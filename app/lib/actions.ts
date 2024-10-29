@@ -4,17 +4,19 @@ import { z } from 'zod';
 import { sql } from '@vercel/postgres';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { signIn } from '@/auth';
+import { AuthError } from 'next-auth';
 
 const FormSchema = z.object({
     id: z.string(),
     customerId: z.string({
-      invalid_type_error: 'Please select a customer.',
+      required_error: 'Please select a customer.',
     }),
     amount: z.coerce
       .number()      //coerce (change) from a string to a number while also validating its type
       .gt(0, { message: 'Please enter an amount greater than $0.' }),
     status: z.enum(['pending', 'paid'], {
-      invalid_type_error: 'Please select an invoice status.',
+      required_error: 'Please select an invoice status.',
     }),
     date: z.string(),    
 });
@@ -74,14 +76,18 @@ export async function createInvoice(prevState: State, formData: FormData) {
 const UpdateInvoice = FormSchema.omit({ id: true, date: true });
  
 // ...
- 
-export async function updateInvoice(id: string,  prevState: State, formData: FormData) {
+
+export async function updateInvoice(
+  id: string,
+  prevState: State,
+  formData: FormData,
+) {
   const validatedFields = UpdateInvoice.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
   });
-
+ 
   if (!validatedFields.success) {
     return {
       errors: validatedFields.error.flatten().fieldErrors,
@@ -97,14 +103,15 @@ export async function updateInvoice(id: string,  prevState: State, formData: For
       UPDATE invoices
       SET customer_id = ${customerId}, amount = ${amountInCents}, status = ${status}
       WHERE id = ${id}
-    `;    
+    `;
   } catch (error) {
-    return {message: 'Database Error: Failed to Update Invoice.'}
+    return { message: 'Database Error: Failed to Update Invoice.' };
   }
-
+ 
   revalidatePath('/dashboard/invoices');
   redirect('/dashboard/invoices');
-};
+}
+
 
 export async function deleteInvoice(id: string) {
   try {
@@ -115,4 +122,23 @@ export async function deleteInvoice(id: string) {
     return { message: 'Database Error: Failed to Delete Invoice.' };
   }
 
+}
+
+export async function authenticate(
+  prevState: string | undefined,
+  formData: FormData,
+) {
+  try {
+    await signIn('credentials', formData);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      switch (error.type) {
+        case 'CredentialsSignin':
+          return 'Invalid credentials.';
+        default:
+          return 'Something went wrong.';
+      }
+    }
+    throw error;
+  }
 }
